@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "@CMAKE_INSTALL_FULL_BINDIR@/xflang",
+    "-f",
+    "{connection_file}",
+    "--resource-dir=@XEUS_FLANG_RESOURCE_DIR@"
+  ],
+  "display_name": "Fortran (Flang REPL)",
+  "language": "fortran",
+  "metadata": {
+    "debugger": false
+  }
+}
+
