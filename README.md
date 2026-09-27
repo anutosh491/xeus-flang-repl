@@ -19,13 +19,16 @@ cmake -S . -B build -G Ninja \
   -DCMAKE_PREFIX_PATH=/Users/anutosh491/micromamba/envs/xeus-cpp-llvm23 \
   -DMLIR_DIR=/private/tmp/flang-wasm-lean-build/lib/cmake/mlir \
   -DFlang_DIR=/private/tmp/flang-wasm-lean-build/lib/cmake/flang \
-  -DXEUS_FLANG_SOURCE_DIR=/Users/anutosh491/work/llvm-project-flang-repl \
+  -DXEUS_FLANG_SOURCE_DIR=/private/tmp/llvm-flang-repl-sparse \
+  -DXEUS_FLANG_OPENMP_RUNTIME=/path/to/libomp.dylib \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Run `build/xflang --version` as a quick smoke test. Installing the project also
-installs its `xflang` kernelspec.
+Run `build/xflang --version` as a quick smoke test. Installing the project
+always installs the `xflang` kernelspec. When `XEUS_FLANG_OPENMP_RUNTIME` is
+set, it also installs `xflang-openmp`, which enables `-fopenmp`, uses `-O2`,
+and preloads the selected runtime before the first cell.
 
 ## Initial scope
 
@@ -34,9 +37,24 @@ installs its `xflang` kernelspec.
 - incremental declarations and executable statements
 - native MLIR ExecutionEngine execution
 - Flang runtime loading and output forwarding
+- frontend option forwarding and native library preloading
+- native CPU OpenMP when launched with `-fopenmp` and `libomp`
+- Jupyter rich display through the `xflang_display` Fortran module
+- `%%mlir` inspection of the LLVM-dialect module sent to the JIT
 
-OpenMP/OpenACC flags, library loading magics, completion, inspection, and a
-WebAssembly kernel are intentionally follow-up work.
+OpenACC execution, completion, source-level inspection, debugger integration,
+and a WebAssembly kernel are follow-up work. Current Flang can expose OpenACC
+operations in HLFIR, but its OpenACC-to-LLVM lowering is not yet complete.
+
+## Examples
+
+- `01-OpenMP-Tour.ipynb` exercises parallel regions, reductions, sections,
+  and tasks.
+- `02-Mandelbrot-OpenMP.ipynb` computes pixels with OpenMP and publishes a BMP
+  directly through Jupyter rich display.
+- `03-MLIR-Inspection.ipynb` uses `%%mlir` to inspect JIT input.
+- `04-OpenACC-MLIR.ipynb` documents the current source-to-HLFIR boundary
+  without claiming executable OpenACC support.
 
 ## Logo
 

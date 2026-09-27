@@ -3,9 +3,12 @@
 #include "flang/Frontend/CompilerInstance.h"
 #include "flang/Interpreter/Interpreter.h"
 #include "flang/Interpreter/MLIRIncrementalExecutor.h"
+#include "flang/Support/Fortran-features.h"
+#include "xeus/xbase64.hpp"
 #include "xeus/xhelper.hpp"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -26,6 +29,80 @@
 #endif
 
 namespace {
+
+extern "C" void xflangDisplayData(const char *mimeType, const char *data) {
+  if (!mimeType || !data)
+    return;
+  nlohmann::json bundle = nlohmann::json::object();
+  bundle[mimeType] = data;
+  xeus::get_interpreter().display_data(
+      std::move(bundle), nlohmann::json::object(), nlohmann::json::object());
+}
+
+extern "C" void xflangDisplayBytes(const char *mimeType, const char *data,
+                                   std::size_t size) {
+  if (!mimeType || !data)
+    return;
+  nlohmann::json bundle = nlohmann::json::object();
+  bundle[mimeType] = xeus::base64encode(std::string(data, size));
+  xeus::get_interpreter().display_data(
+      std::move(bundle), nlohmann::json::object(), nlohmann::json::object());
+}
+
+extern "C" void xflangClearOutput(bool wait) {
+  xeus::get_interpreter().clear_output(wait);
+}
+
+constexpr llvm::StringLiteral DisplayModule = R"fortran(
+module xflang_display
+  use, intrinsic :: iso_c_binding, only: c_bool, c_char, c_null_char, c_size_t
+  implicit none
+
+  interface
+    subroutine xflang_display_data_c(mime_type, data) &
+        bind(c, name="xflangDisplayData")
+      import c_char
+      character(kind=c_char), intent(in) :: mime_type(*)
+      character(kind=c_char), intent(in) :: data(*)
+    end subroutine
+
+    subroutine xflang_clear_output_c(wait) &
+        bind(c, name="xflangClearOutput")
+      import c_bool
+      logical(kind=c_bool), value, intent(in) :: wait
+    end subroutine
+
+    subroutine xflang_display_bytes_c(mime_type, data, size) &
+        bind(c, name="xflangDisplayBytes")
+      import c_char, c_size_t
+      character(kind=c_char), intent(in) :: mime_type(*)
+      character(kind=c_char), intent(in) :: data(*)
+      integer(kind=c_size_t), value, intent(in) :: size
+    end subroutine
+  end interface
+
+contains
+  subroutine display_data(mime_type, data)
+    character(len=*), intent(in) :: mime_type, data
+    call xflang_display_data_c(trim(mime_type) // c_null_char, &
+                               trim(data) // c_null_char)
+  end subroutine
+
+  subroutine clear_output(wait)
+    logical, intent(in), optional :: wait
+    logical(kind=c_bool) :: should_wait
+    should_wait = .false._c_bool
+    if (present(wait)) should_wait = wait
+    call xflang_clear_output_c(should_wait)
+  end subroutine
+
+  subroutine display_bytes(mime_type, data)
+    character(len=*), intent(in) :: mime_type, data
+    call xflang_display_bytes_c(trim(mime_type) // c_null_char, data, &
+                                int(len(data), kind=c_size_t))
+  end subroutine
+end module
+)fortran";
 
 std::string getIntrinsicModulePath(llvm::StringRef resourceDirectory,
                                    const llvm::Triple &triple) {
@@ -146,10 +223,18 @@ Interpreter::Interpreter(InterpreterOptions options) {
   builder.setExecutablePath(options.executablePath);
   builder.setTargetTriple(triple.str());
   builder.addIntrinsicModuleDirectory(intrinsicModuleDirectory);
+  for (const std::string &argument : options.compilerArguments)
+    builder.addCompilerArgument(argument);
 
   auto compiler = builder.create();
   if (!compiler)
     throw std::runtime_error(llvm::toString(compiler.takeError()));
+  if (options.trace)
+    llvm::errs()
+        << "[xflang] OpenMP enabled: "
+        << (*compiler)->getInvocation().getFrontendOpts().features.IsEnabled(
+               Fortran::common::LanguageFeature::OpenMP)
+        << '\n';
 
   auto executor =
       std::make_unique<Fortran::interpreter::MLIRIncrementalExecutor>();
@@ -158,11 +243,14 @@ Interpreter::Interpreter(InterpreterOptions options) {
   if (!created)
     throw std::runtime_error(llvm::toString(created.takeError()));
   interpreter = std::move(*created);
+  trace = options.trace;
+  captureOutput = options.captureOutput;
 
   runtimeLibraryPath =
       options.runtimeLibrary.empty()
           ? getRuntimeLibraryPath(options.resourceDirectory, triple)
           : std::move(options.runtimeLibrary);
+  preloadLibraries = std::move(options.preloadLibraries);
 }
 
 Interpreter::~Interpreter() = default;
@@ -176,6 +264,29 @@ void Interpreter::configure_impl() {
   if (llvm::Error error =
           interpreter->loadDynamicLibrary(runtimeLibraryPath.c_str()))
     throw std::runtime_error(llvm::toString(std::move(error)));
+  for (const std::string &path : preloadLibraries) {
+    if (!llvm::sys::fs::exists(path))
+      throw std::runtime_error("preload library was not found at '" + path +
+                               "'");
+    if (llvm::Error error = interpreter->loadDynamicLibrary(path.c_str()))
+      throw std::runtime_error(llvm::toString(std::move(error)));
+  }
+
+  if (llvm::Error error = interpreter->registerSymbol(
+          "xflangDisplayData",
+          llvm::orc::ExecutorAddr::fromPtr(&xflangDisplayData)))
+    throw std::runtime_error(llvm::toString(std::move(error)));
+  if (llvm::Error error = interpreter->registerSymbol(
+          "xflangClearOutput",
+          llvm::orc::ExecutorAddr::fromPtr(&xflangClearOutput)))
+    throw std::runtime_error(llvm::toString(std::move(error)));
+  if (llvm::Error error = interpreter->registerSymbol(
+          "xflangDisplayBytes",
+          llvm::orc::ExecutorAddr::fromPtr(&xflangDisplayBytes)))
+    throw std::runtime_error(llvm::toString(std::move(error)));
+  if (llvm::Error error = interpreter->compileAndExecute(DisplayModule))
+    throw std::runtime_error("could not initialize xflang_display: " +
+                             llvm::toString(std::move(error)));
 
   runtimeFlush = reinterpret_cast<void (*)(int)>(
       llvm::sys::DynamicLibrary::SearchForAddressOfSymbol("_FortranAFlush"));
@@ -190,11 +301,38 @@ void Interpreter::execute_request_impl(send_reply_callback callback, int,
                                        nlohmann::json) {
   llvm::Error executionError = llvm::Error::success();
   CapturedStreams streams;
+  std::string mlirOutput;
   try {
-    StreamCapture capture;
-    executionError = interpreter->compileAndExecute(code);
-    runtimeFlush(-1);
-    streams = capture.finish();
+    llvm::StringRef source{code};
+    bool showMLIR = false;
+    if (source.consume_front("%%mlir\r\n") || source.consume_front("%%mlir\n"))
+      showMLIR = true;
+
+    llvm::Expected<Fortran::interpreter::CellArtifact &> cell =
+        interpreter->compile(source);
+    if (!cell) {
+      executionError = cell.takeError();
+    } else {
+      if (trace) {
+        llvm::errs() << "[xflang] prepared cell:\n"
+                     << cell->getCompiledSource() << "[xflang] LLVM MLIR:\n";
+        cell->getModule().print(llvm::errs());
+        llvm::errs() << '\n';
+      }
+      if (showMLIR) {
+        llvm::raw_string_ostream stream{mlirOutput};
+        cell->getModule().print(stream);
+        stream.flush();
+      } else if (captureOutput) {
+        StreamCapture capture;
+        executionError = interpreter->execute(*cell);
+        runtimeFlush(-1);
+        streams = capture.finish();
+      } else {
+        executionError = interpreter->execute(*cell);
+        runtimeFlush(-1);
+      }
+    }
   } catch (const std::exception &exception) {
     executionError = llvm::createStringError(llvm::inconvertibleErrorCode(),
                                              exception.what());
@@ -205,6 +343,12 @@ void Interpreter::execute_request_impl(send_reply_callback callback, int,
       publish_stream("stdout", streams.out);
     if (!streams.err.empty())
       publish_stream("stderr", streams.err);
+    if (!mlirOutput.empty()) {
+      nlohmann::json bundle = nlohmann::json::object();
+      bundle["text/plain"] = std::move(mlirOutput);
+      display_data(std::move(bundle), nlohmann::json::object(),
+                   nlohmann::json::object());
+    }
   }
 
   if (executionError) {

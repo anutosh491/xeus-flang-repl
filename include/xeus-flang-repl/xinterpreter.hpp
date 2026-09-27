@@ -5,6 +5,7 @@
 #include "xeus/xinterpreter.hpp"
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace xflang {} // namespace xflang
 
@@ -19,6 +20,10 @@ struct InterpreterOptions {
   std::string resourceDirectory;
   std::string runtimeLibrary;
   std::string targetTriple;
+  std::vector<std::string> compilerArguments;
+  std::vector<std::string> preloadLibraries;
+  bool trace{false};
+  bool captureOutput{true};
 };
 
 class Interpreter final : public xeus::xinterpreter {
@@ -46,7 +51,10 @@ private:
 
   std::unique_ptr<Fortran::interpreter::Interpreter> interpreter;
   std::string runtimeLibraryPath;
+  std::vector<std::string> preloadLibraries;
   void (*runtimeFlush)(int){nullptr};
+  bool trace{false};
+  bool captureOutput{true};
 };
 
 } // namespace xflang

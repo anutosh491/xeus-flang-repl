@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "@CMAKE_INSTALL_FULL_BINDIR@/xflang",
+    "-f",
+    "{connection_file}",
+    "--resource-dir=@XEUS_FLANG_RESOURCE_DIR@",
+    "--compiler-arg=-fopenmp",
+    "--compiler-arg=-O2",
+    "--load-library=@XEUS_FLANG_OPENMP_RUNTIME@"
+  ],
+  "display_name": "Fortran (Flang REPL + OpenMP)",
+  "language": "fortran",
+  "metadata": {
+    "debugger": false
+  }
+}
