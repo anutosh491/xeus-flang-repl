@@ -304,33 +304,51 @@ void Interpreter::execute_request_impl(send_reply_callback callback, int,
   std::string mlirOutput;
   try {
     llvm::StringRef source{code};
-    bool showMLIR = false;
-    if (source.consume_front("%%mlir\r\n") || source.consume_front("%%mlir\n"))
-      showMLIR = true;
-
-    llvm::Expected<Fortran::interpreter::CellArtifact &> cell =
-        interpreter->compile(source);
-    if (!cell) {
-      executionError = cell.takeError();
-    } else {
-      if (trace) {
-        llvm::errs() << "[xflang] prepared cell:\n"
-                     << cell->getCompiledSource() << "[xflang] LLVM MLIR:\n";
-        cell->getModule().print(llvm::errs());
-        llvm::errs() << '\n';
-      }
-      if (showMLIR) {
-        llvm::raw_string_ostream stream{mlirOutput};
-        cell->getModule().print(stream);
-        stream.flush();
-      } else if (captureOutput) {
-        StreamCapture capture;
-        executionError = interpreter->execute(*cell);
-        runtimeFlush(-1);
-        streams = capture.finish();
+    if (source.consume_front("%load")) {
+      source = source.trim();
+      if (source.empty()) {
+        executionError = llvm::createStringError(
+            llvm::inconvertibleErrorCode(), "%load requires a library path");
+      } else if (source.contains('\n') || source.contains('\r')) {
+        executionError = llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                                 "%load accepts one path");
       } else {
-        executionError = interpreter->execute(*cell);
-        runtimeFlush(-1);
+        executionError =
+            interpreter->loadDynamicLibrary(source.str().c_str());
+        if (!executionError)
+          streams.out = "loaded '" + source.str() + "'\n";
+      }
+    } else {
+      bool showMLIR = false;
+      if (source.consume_front("%%mlir\r\n") ||
+          source.consume_front("%%mlir\n"))
+        showMLIR = true;
+
+      llvm::Expected<Fortran::interpreter::CellArtifact &> cell =
+          interpreter->compile(source);
+      if (!cell) {
+        executionError = cell.takeError();
+      } else {
+        if (trace) {
+          llvm::errs() << "[xflang] prepared cell:\n"
+                       << cell->getCompiledSource() << "[xflang] LLVM MLIR:\n";
+          cell->getModule().print(llvm::errs());
+          llvm::errs() << '\n';
+        }
+        if (showMLIR) {
+          llvm::raw_string_ostream stream{mlirOutput};
+          cell->getModule().print(stream);
+          stream.flush();
+          executionError = interpreter->discard(*cell);
+        } else if (captureOutput) {
+          StreamCapture capture;
+          executionError = interpreter->execute(*cell);
+          runtimeFlush(-1);
+          streams = capture.finish();
+        } else {
+          executionError = interpreter->execute(*cell);
+          runtimeFlush(-1);
+        }
       }
     }
   } catch (const std::exception &exception) {

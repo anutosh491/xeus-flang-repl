@@ -41,6 +41,7 @@ and preloads the selected runtime before the first cell.
 - native CPU OpenMP when launched with `-fopenmp` and `libomp`
 - Jupyter rich display through the `xflang_display` Fortran module
 - `%%mlir` inspection of the LLVM-dialect module sent to the JIT
+- `%load /absolute/path/to/library` for loading native dynamic libraries
 
 OpenACC execution, completion, source-level inspection, debugger integration,
 and a WebAssembly kernel are follow-up work. Current Flang can expose OpenACC
@@ -55,6 +56,8 @@ operations in HLFIR, but its OpenACC-to-LLVM lowering is not yet complete.
 - `03-MLIR-Inspection.ipynb` uses `%%mlir` to inspect JIT input.
 - `04-OpenACC-MLIR.ipynb` documents the current source-to-HLFIR boundary
   without claiming executable OpenACC support.
+- `05-Stress-Test-and-OpenBLAS.ipynb` exercises persistent state, procedures,
+  recursion, `ISO_C_BINDING`, native `%load`, CBLAS, and LAPACKE in one session.
 
 ## Logo
 
