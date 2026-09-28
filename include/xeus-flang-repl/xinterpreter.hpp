@@ -15,6 +15,11 @@ class Interpreter;
 
 namespace xflang {
 
+enum class CellCompilerMode {
+  Isolated,
+  Persistent,
+};
+
 struct InterpreterOptions {
   std::string executablePath;
   std::string resourceDirectory;
@@ -22,6 +27,7 @@ struct InterpreterOptions {
   std::string targetTriple;
   std::vector<std::string> compilerArguments;
   std::vector<std::string> preloadLibraries;
+  CellCompilerMode cellCompilerMode{CellCompilerMode::Persistent};
   bool trace{false};
   bool captureOutput{true};
 };

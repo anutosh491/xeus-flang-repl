@@ -30,9 +30,14 @@ always installs the `xflang` kernelspec. When `XEUS_FLANG_OPENMP_RUNTIME` is
 set, it also installs `xflang-openmp`, which enables `-fopenmp`, uses `-O2`,
 and preloads the selected runtime before the first cell.
 
+The kernel uses one persistent `CompilerInstance` by default. Pass
+`--cell-compiler=isolated` to construct a fresh input-specific compiler for
+each cell while retaining the same interpreter, module history, and JIT. This
+is primarily a correctness oracle for testing the persistent reset boundary.
+
 ## Initial scope
 
-- one persistent Flang interpreter per kernel process
+- one persistent Flang interpreter and compiler instance per kernel process
 - one MLIR module per Jupyter cell
 - incremental declarations and executable statements
 - native MLIR ExecutionEngine execution

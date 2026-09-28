@@ -238,13 +238,23 @@ Interpreter::Interpreter(InterpreterOptions options) {
 
   auto executor =
       std::make_unique<Fortran::interpreter::MLIRIncrementalExecutor>();
-  auto created = Fortran::interpreter::Interpreter::create(std::move(*compiler),
-                                                           std::move(executor));
+  const auto cellCompilerKind =
+      options.cellCompilerMode == CellCompilerMode::Persistent
+          ? Fortran::interpreter::CellCompilerKind::Persistent
+          : Fortran::interpreter::CellCompilerKind::Isolated;
+  auto created = Fortran::interpreter::Interpreter::create(
+      std::move(*compiler), std::move(executor), cellCompilerKind);
   if (!created)
     throw std::runtime_error(llvm::toString(created.takeError()));
   interpreter = std::move(*created);
   trace = options.trace;
   captureOutput = options.captureOutput;
+  if (trace)
+    llvm::errs() << "[xflang] cell compiler: "
+                 << (options.cellCompilerMode == CellCompilerMode::Persistent
+                         ? "persistent"
+                         : "isolated")
+                 << '\n';
 
   runtimeLibraryPath =
       options.runtimeLibrary.empty()

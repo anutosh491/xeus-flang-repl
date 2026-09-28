@@ -47,6 +47,16 @@ bool hasOption(int argc, char **argv, const std::string &name) {
   return false;
 }
 
+xflang::CellCompilerMode cellCompilerMode(int argc, char **argv) {
+  std::string value = optionValue(argc, argv, "--cell-compiler");
+  if (value.empty() || value == "persistent")
+    return xflang::CellCompilerMode::Persistent;
+  if (value == "isolated")
+    return xflang::CellCompilerMode::Isolated;
+  throw std::runtime_error(
+      "--cell-compiler must be 'persistent' or 'isolated'");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -55,19 +65,20 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  xflang::InterpreterOptions options;
-  options.executablePath = argv[0];
-  options.resourceDirectory = optionValue(argc, argv, "--resource-dir");
-  if (options.resourceDirectory.empty())
-    options.resourceDirectory = XEUS_FLANG_DEFAULT_RESOURCE_DIR;
-  options.runtimeLibrary = optionValue(argc, argv, "--runtime-library");
-  options.targetTriple = optionValue(argc, argv, "--target");
-  options.compilerArguments = optionValues(argc, argv, "--compiler-arg");
-  options.preloadLibraries = optionValues(argc, argv, "--load-library");
-  options.trace = hasOption(argc, argv, "--trace");
-  options.captureOutput = !hasOption(argc, argv, "--no-capture");
-
   try {
+    xflang::InterpreterOptions options;
+    options.executablePath = argv[0];
+    options.resourceDirectory = optionValue(argc, argv, "--resource-dir");
+    if (options.resourceDirectory.empty())
+      options.resourceDirectory = XEUS_FLANG_DEFAULT_RESOURCE_DIR;
+    options.runtimeLibrary = optionValue(argc, argv, "--runtime-library");
+    options.targetTriple = optionValue(argc, argv, "--target");
+    options.compilerArguments = optionValues(argc, argv, "--compiler-arg");
+    options.preloadLibraries = optionValues(argc, argv, "--load-library");
+    options.cellCompilerMode = cellCompilerMode(argc, argv);
+    options.trace = hasOption(argc, argv, "--trace");
+    options.captureOutput = !hasOption(argc, argv, "--no-capture");
+
     std::string connectionFile = xeus::extract_filename(argc, argv);
     auto interpreter =
         std::make_unique<xflang::Interpreter>(std::move(options));
